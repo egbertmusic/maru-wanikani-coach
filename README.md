@@ -65,6 +65,7 @@
 ## Contribution
 
 Contributions are welcome! Feel free to open issues for bugs or features you'd like to see, and submit pull requests with fixes or improvements. Please ensure all contributions follow best coding practices and include appropriate tests where applicable.
+Also i am working on making a Ko-fi account for donations too so stay in tune
 
 
 ---
