@@ -66,9 +66,6 @@
 
 Contributions are welcome! Feel free to open issues for bugs or features you'd like to see, and submit pull requests with fixes or improvements. Please ensure all contributions follow best coding practices and include appropriate tests where applicable.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
