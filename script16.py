@@ -28,11 +28,11 @@ from telegram.constants import ParseMode
 # CONFIGURATION
 # ==========================================
 # WaniKani & Telegram
-WANIKANI_API_TOKEN = "1e572ef4-5d7d-46fb-8172-14549c125a28"
-TELEGRAM_BOT_TOKEN = "8210154238:AAGdwkf0k4yWiVjhqd2SIBkiim773NyAe0E"
+WANIKANI_API_TOKEN = "YOUR-WANIKANI-API-HERE"
+TELEGRAM_BOT_TOKEN = "YOUR-TELEGRAM-API-HERE"
 
 # Proactive notifications
-TELEGRAM_CHAT_ID = "6790049935"
+TELEGRAM_CHAT_ID = "YOUR-USER/CHAT-ID"
 
 # ==========================================
 # VOICEVOX & KITSU CONFIGURATION
@@ -42,14 +42,14 @@ VOICEVOX_BASE_URL = "http://127.0.0.1:50021"
 VOICEVOX_SPEAKER_ID = 8  # 46 = Sayo, 2 = Shikoku Metan, 3 = Zundamon
 
 # Kitsu Integration (can be your numeric ID or username/slug)
-KITSU_IDENTIFIER = "1704230"
+KITSU_IDENTIFIER = "YOUR-KITSU-IDENTIFIER"
 
 # ==========================================
 # REMOTE PC & OLLAMA CONFIGURATION
 # ==========================================
 PC_MAC_ADDRESS = "60:cf:84:a2:a7:ee"
-PC_IP_ADDRESS = "192.168.1.57"
-SSH_USER = "egbert"
+PC_IP_ADDRESS = "192.168.1.57" #This is a placeholder please place your pc api adress here
+SSH_USER = "USERNAME-HERE   "
 SSH_KEY_PATH = "~/.ssh/id_rsa"
 
 # Ollama Configuration on the remote PC
@@ -58,9 +58,9 @@ OLLAMA_MODEL = "qwen2.5:32b"
 
 # External Free API Configuration (Google Gemini Free Tier for Vision)
 GEMINI_API_KEYS = [
-    "AIzaSyAyF2dv2Rlpj7_2hejWnObLzolMdb96a4U",
-    "AIzaSyAM3bdYfWjVcCjS9gCcUL3TMMNfXI4YwAQ",
-    "AIzaSyB3fIKZzWujXdXHP-IPnZ9epE8lICCg1-w"
+    "GEMINI-API-ACCOUNT1",
+    "GEMINI-API-ACCOUNT2",
+    "GEMINI-API-ACCOUNT3"
 ]
 
 ollama_client = AsyncOpenAI(

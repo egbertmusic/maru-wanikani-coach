@@ -1,0 +1,50 @@
+{
+    "happy": [
+        "CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA"
+    ],
+    "angry": [
+        "CAACAgQAAxkBAAERO-JqCOZG5jpVLIk93bLqj64zMIaTXQACBSEAAuvFSVCxVQViXa7LSjsE",
+        "CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"
+    ],
+    "cry": [
+        "CAACAgQAAxkBAAERO-5qCOZSVeByfgHqx3ngeZ0iSHhdBQAClx4AAvyRSFAV-GT-N5mJVDsE"
+    ],
+    "sleep": [
+        "CAACAgQAAxkBAAERO-hqCOZMG-JLMQjtZPC-bMbPQl3fBwAC6hoAAq_aSVAWt_gk_KX-UjsE",
+        "CAACAgQAAxkBAAERO-pqCOZORHtVlN58MmyEfjHyiwpeUAACGh8AAvAESVCygIAzozThdTsE"
+    ],
+    "smile": [
+        "CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE",
+        "CAACAgQAAxkBAAERO-ZqCOZKonIa14FjkpM_UfJxfX0ekgACGh0AAqLuSVDQBb8eZJoDGDsE"
+    ],
+    "pout": [
+        "CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"
+    ],
+    "blush": [
+        "CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE"
+    ],
+    "smug": [],
+    "tease": [],
+    "shocked": [],
+    "love": [
+        "CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA"
+    ],
+    "コレコレ": [
+        "CAACAgQAAxkBAAERQR9qDdtWHOKqZwzgSoj-Nbvp3tm_4AAC0SEAAvOLcFBA4WY8W3HhFjsE"
+    ],
+    "ただいま": [
+        "CAACAgQAAxkBAAERQSNqDeKVCH7ZhKwwAzqEkUI14FngDgACUyEAAmHycVBtBJz6d13PcDsE"
+    ],
+    "Spy x Family": [
+        "CAACAgQAAxkBAAERQSdqDeS0LKKO1A9R1e7SVxZMpiGNhQAC6g0AAs_NAVB7kM2jawTnnjsE"
+        "CAACAgUAAxkBAAERQSlqDeVfoGLAm-tnMOTgN4Ne7of_9wAC6gUAAiE06FdFKR6TbCAN8jsE"
+        "CAACAgUAAxkBAAERQStqDeV4M8iSRmdvqxtXbzQAAdMcQaUAArIFAAKtmZlU5H-zUrwPTrE7BA"
+    ]
+    "My dress up darling": [
+        "CAACAgIAAxkBAAERQTRqDeaF_deUR4GFXeyp9oNmUV2ljgACiG4AAgmWAAFJM1lbMImOx1s7BA"
+        "CAACAgIAAxkBAAERQTZqDeal08C2LvZ9P40b8p2qPgFNnwACfREAArjP2UnhPS-SuJBRzTsE"
+    "scared": [],
+    "thinking": [],
+    "wink": [],
+    "headpat": []
+}
