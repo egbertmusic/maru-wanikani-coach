@@ -6,7 +6,7 @@
 - **WaniKani Stats**: Fetch and display detailed statistics on your current level, lessons, and reviews.
 - **Real-Time Alerts**: Receive notifications when you gain a new level, complete all reviews, or have new lessons to work through plus it nags you when you are being lazy it is designed to know what time is it and not get angry if its late at night because of course you cant or shouldnt be doing your wanikani reviews late at night.
 - **Media Processing**: Supports voice messages and images for personalized interactions.
-- **Scheduled Batch Generation**: Automatically generates daily messages at midnight because we are using local compute and electricity aint cheap besides its faster we make it pregenerate the messages so it doesnt turn the pc off and on constantly and why generate the automated messages with an llm? you may ask, honestly no clue i just felt that a hardcoded message was boring and i was getting used to the same thing so i would start skipping it so i decided to make it different .
+- **Scheduled Batch Generation**: Automatically generates daily messages at midnight because we are using local compute and electricity ain't cheap besides its faster this way, we make it pregenerate the messages so it doesnt turn the pc off and on constantly and why generate the automated messages with an llm? you may ask, honestly no clue i just felt that a hardcoded message was boring and i was getting used to the same thing so i would start skipping it so i decided to make it different .
 - **Idle PC Management**: Wake up your computer if it's needed for processing requests.
 
 ## Setup
