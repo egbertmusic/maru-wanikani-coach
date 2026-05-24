@@ -1,73 +1,71 @@
+丸 (Maru) - The Unhinged WaniKani Coach 🦀✨
+丸 is a comprehensive, AI-driven Telegram bot designed to manage and alert users about their WaniKani study progress. She has a completely unhinged "tsun-yan" personality, meaning she is hopelessly down-bad for you but covers it up by being fiercely demanding about your Japanese studies.
+It offers interactive features such as fetching real-time stats, processing voice and image messages, sending you Japanese voice notes, and providing scheduled alerts for new lessons or reviews.
+Features
+WaniKani Stats: Fetch and display detailed statistics on your current level, lessons, and reviews.
+Real-Time Alerts: Receive notifications when you gain a new level, complete all reviews, or have new lessons to work through plus it nags you when you are being lazy. It is designed to know what time it is and not get angry if it's late at night because of course you can't or shouldn't be doing your wanikani reviews late at night.
+Media Processing: Supports voice messages (it transcribes what you say) and images (uses Gemini vision to see what you send her) for personalized interactions.
+Voice Notes: Uses Voicevox to dynamically generate and send audio of her speaking Japanese to you based on the LLM's text.
+Scheduled Batch Generation: Automatically generates daily messages at midnight because we are using local compute and electricity ain't cheap. Besides, it's faster this way, we make it pregenerate the messages so it doesn't turn the pc off and on constantly. And why generate the automated messages with an llm you may ask? Honestly no clue I just felt that a hardcoded message was boring and I was getting used to the same thing so I would start skipping it so I decided to make it different.
+Idle PC Management: Wakes up your beefy computer via Wake-on-LAN if it's needed for processing requests, and safely SSHs in to shut it down when you haven't talked to her in 10 minutes to save VRAM and power.
+The Architecture (Why is this so complicated?)
+Running a massive 32-billion parameter LLM (qwen2.5:32b) requires a powerful GPU, but leaving a gaming PC on 24/7 just to wait for WaniKani updates is a waste of money.
+To solve this, Maru is split across two machines:
+The Host (Machine A): A low-power, always-on device (like a Raspberry Pi). This runs the main Python script 24/7, tracks WaniKani timers, and runs the Voicevox engine locally.
+The Brain (Machine B): Your beefy gaming rig or server. It stays turned off most of the time. When you message Maru, the Host sends a Magic Packet to turn the Brain on, connects via SSH to start Ollama, gets the response, and then shuts the Brain back off after 10 minutes of silence.
+Setup & Installation
+Prerequisites & API Keys
+Before you begin, you need to gather a bunch of tokens:
+Telegram Bot Token: Get this from BotFather on Telegram.
+Your Telegram Chat ID: Use a bot like @userinfobot to find your numeric ID.
+WaniKani API V2 Token: Generate this in your WaniKani account settings.
+Kitsu Identifier: Your Kitsu username or numeric ID (so she can spy on what anime you are watching).
+Google Gemini API Keys: Free tier keys from Google AI Studio. (The script supports up to 3 keys for fallback/rate-limit dodging. Used for image recognition).
+Step 1: Setting up "The Brain" (Your Beefy PC)
+This is the computer that actually runs the LLM.
+Enable Wake-on-LAN (WoL):
+Go into your motherboard's BIOS and enable "Wake on LAN", "Power On By PCI-E", or similar.
+If using Windows/Linux, ensure your network adapter settings allow the device to wake the computer.
+Install Ollama: Download and install Ollama, then pull the model you want to use (default is qwen2.5:32b):
+ollama run qwen2.5:32b
 
-丸 is a comprehensive, AI-driven Telegram bot designed to manage and alert users about their WaniKani study progress. It offers interactive features such as fetching real-time stats, processing voice and image messages, and providing scheduled alerts for new lessons or reviews.
 
-## Features
+Setup SSH Server: Install OpenSSH server so the Host can log in remotely.
+Configure Passwordless Sudo (Linux): The Host needs to be able to start the Ollama service and shut down the PC without typing a password. Edit your sudoers file (sudo visudo) and add:
+your_username ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ollama, /usr/bin/systemctl poweroff
 
-- **WaniKani Stats**: Fetch and display detailed statistics on your current level, lessons, and reviews.
-- **Real-Time Alerts**: Receive notifications when you gain a new level, complete all reviews, or have new lessons to work through plus it nags you when you are being lazy it is designed to know what time is it and not get angry if its late at night because of course you cant or shouldnt be doing your wanikani reviews late at night.
-- **Media Processing**: Supports voice messages and images for personalized interactions.
-- **Scheduled Batch Generation**: Automatically generates daily messages at midnight because we are using local compute and electricity ain't cheap besides its faster this way, we make it pregenerate the messages so it doesnt turn the pc off and on constantly and why generate the automated messages with an llm? you may ask, honestly no clue i just felt that a hardcoded message was boring and i was getting used to the same thing so i would start skipping it so i decided to make it different .
-- **Idle PC Management**: Wake up your computer if it's needed for processing requests.
 
-## Setup
+Step 2: Setting up "The Host" (Raspberry Pi / Always-On PC)
+This machine runs the Python script and stays on forever.
+Generate SSH Keys: Create an SSH key and copy it to your Brain PC so it can log in without a password.
+ssh-keygen -t rsa
+ssh-copy-id username@IP_OF_YOUR_BEEFY_PC
 
-### Prerequisites
-1. Python 3.8+
-2. Required Libraries:
-    - `python-telegram-bot`
-    - `pytz`
-    - `requests`
 
-### Installation Steps
-1. Clone the repository to your local machine.
-    ```bash
-    git clone https://github.com/egbertmusic/maru-wanikani-coach.git
-    cd maru-wanikani-coach
-    ```
-2. Install dependencies:
-    ```bash
-    pip install python-telegram-bot pytz requests
-    ```
+Install Voicevox Engine: Install Voicevox and make sure the engine is running on http://127.0.0.1:50021. (Docker is the easiest way to do this on a Pi).
+Install Python 3.8+ & Dependencies:
+pip install python-telegram-bot requests openai google-genai
 
-### Configuration
 
-1. **Environment Variables**:
-   - Set your bot token, chat ID, and other necessary tokens in a `.env` file.
-     ```dotenv
-     TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-     TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
-     WANIKANI_API_TOKEN=WANIKANI_USER_API_TOKEN
-     KITSU_IDENTIFIER=YOUR_KITSU_IDENTIFIER
-     ```
+Step 3: Configuration
+Open the python script (main.py or whatever you named it) and edit the CONFIGURATION block at the very top. You need to hardcode your setup details here:
+Paste your Telegram, WaniKani, Kitsu, and Gemini keys.
+Update PC_MAC_ADDRESS and PC_IP_ADDRESS with your Beefy PC's details.
+Update SSH_USER to your Beefy PC's username.
+Verify the VOICEVOX_SPEAKER_ID (default is 8, but you can change it depending on what voice you want).
+Step 4: Running the Bot
+Run the bot on your Host machine!
+python main.py
 
-2. **File Structure**:
-   - Ensure you have the necessary files for memory and message cache.
-     ```bash
-     touch memory.json message_cache.json
-     ```
 
-### Running the Bot
-
-1. Execute the bot using Python:
-    ```bash
-    python main.py
-    ```
-
-## Usage
-
-- **/start**: Initiate interaction with the bot to access primary commands.
-- **Stats and Alerts**:
-  - `📊 My WaniKani Stats`: Fetch detailed statistics.
-  - `🇯🇵 Quick Summary`: Get a quick summary of your current status.
-  - `⏰ Next Review`: Check when your next review session is scheduled.
-- **LLM Control**: Manage the bot's automated message generation and alerts through the menu options.
-
-## Contribution
-
+(Pro-tip: run it in a tmux session or set it up as a systemd service so it doesn't die when you close your terminal).
+Usage
+/start: Initiate interaction with the bot and bring up the main menu keyboard.
+Stats and Alerts:
+📊 My WaniKani Stats: Fetch detailed statistics and SRS distribution.
+🇯🇵 Quick Summary: Get a fast overview of your current status.
+⏰ Next Review: Check exactly when your next review session is scheduled.
+LLM Control: Click ⚙️ LLM Control to manually trigger the batch generation of messages for the cache, or to turn the LLM auto-responses on/off.
+Contribution
 Contributions are welcome! Feel free to open issues for bugs or features you'd like to see, and submit pull requests with fixes or improvements. Please ensure all contributions follow best coding practices and include appropriate tests where applicable.
-Also i am working on making a Ko-fi account for donations too so stay in tune
-
-
----
-
-**Note**: Ensure you have necessary permissions and tokens from WaniKani and Kitsu before running the bot. This README assumes that your environment variables are set up correctly.
+Also I am working on making a Ko-fi account for donations too so stay tuned.
