@@ -166,6 +166,6 @@ To map your own custom sticker pack:
 
 ## **🤝 Contribution & Support**
 
-Contributions, issues, and feature suggestions are highly welcomed\! Please write clean code, keep state files decoupled, and respect the character prompt design.  
-Stay tuned as I set up a Ko-fi donation page soon to help fund the local compute electricity bill\! ☕💕  
+Contributions, issues, and feature suggestions are highly welcomed\!
+You can also help fund the local compute electricity bill or motivate me to do more projects like this on my ko-fi\! ☕💕  
 *Disclaimer: This bot is not affiliated with WaniKani or Tofugu. Be sure to check your local power settings and keep your SSH keys secure\!*
