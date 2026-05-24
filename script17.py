@@ -9,6 +9,7 @@ import base64
 import socket
 import struct
 import random
+import copy
 from datetime import datetime, timezone, time as dt_time
 from openai import AsyncOpenAI
 
@@ -37,26 +38,22 @@ TELEGRAM_CHAT_ID = "YOUR-USER/CHAT-ID"
 # ==========================================
 # VOICEVOX & KITSU CONFIGURATION
 # ==========================================
-# Voicevox running locally on the Raspberry Pi
 VOICEVOX_BASE_URL = "http://127.0.0.1:50021"
-VOICEVOX_SPEAKER_ID = 8  # 46 = Sayo, 2 = Shikoku Metan, 3 = Zundamon
+VOICEVOX_SPEAKER_ID = 8
 
-# Kitsu Integration (can be your numeric ID or username/slug)
 KITSU_IDENTIFIER = "YOUR-KITSU-IDENTIFIER"
 
 # ==========================================
 # REMOTE PC & OLLAMA CONFIGURATION
 # ==========================================
 PC_MAC_ADDRESS = "60:cf:84:a2:a7:ee"
-PC_IP_ADDRESS = "192.168.1.57" #This is a placeholder please place your pc api adress here
+PC_IP_ADDRESS = "192.168.1.57" 
 SSH_USER = "USERNAME-HERE   "
 SSH_KEY_PATH = "~/.ssh/id_rsa"
 
-# Ollama Configuration on the remote PC
 OLLAMA_BASE_URL = f"http://{PC_IP_ADDRESS}:11434/v1"
 OLLAMA_MODEL = "qwen2.5:32b"
 
-# External Free API Configuration (Google Gemini Free Tier for Vision)
 GEMINI_API_KEYS = [
     "GEMINI-API-ACCOUNT1",
     "GEMINI-API-ACCOUNT2",
@@ -79,7 +76,6 @@ except ImportError:
 # EXPONENTAL BACKOFF RETRY HELPER
 # ==========================================
 async def call_gemini_with_fallback(model_name: str, contents: list) -> str:
-    """Calls Gemini with configured API keys, retrying up to 5 times per key with exponential backoff."""
     if not GEMINI_AVAILABLE:
         raise Exception("Google GenAI SDK not installed.")
 
@@ -89,7 +85,6 @@ async def call_gemini_with_fallback(model_name: str, contents: list) -> str:
 
     last_error = None
     for i, key in enumerate(valid_keys):
-        # Retry logic: Try up to 3 times per key with exponential backoff
         for attempt in range(3):
             try:
                 client = genai.Client(api_key=key.strip())
@@ -101,7 +96,6 @@ async def call_gemini_with_fallback(model_name: str, contents: list) -> str:
                 return response.text
             except Exception as e:
                 last_error = e
-                # Backoff: 1s, 2s, 4s...
                 delay = 2 ** attempt
                 await asyncio.sleep(delay)
                 continue
@@ -129,7 +123,11 @@ DEFAULT_MESSAGES = {
 }
 
 DEFAULT_STATE = {
-    "llm_auto_run": True
+    "llm_auto_run": True,
+    "gen_targets": {
+        "morning": 5, "afternoon": 5, "evening": 5, "night": 5,
+        "cleared": 5, "ignoring": 5, "level_up": 5, "new_lessons": 5
+    }
 }
 
 DEFAULT_MEMORY = {
@@ -140,8 +138,6 @@ DEFAULT_MEMORY = {
     "reviews_appeared_time": None
 }
 
-# --- EMOTIONAL VOICE PRESETS MAP ---
-# These define safe, pre-tested voice configurations so the LLM doesn't have to guess parameters!
 VOICE_PRESETS = {
     "normal":  {"speed": 1.0,  "pitch": 0.0,   "intonation": 1.0},
     "shy":     {"speed": 0.9,  "pitch": -0.05, "intonation": 0.8},
@@ -158,13 +154,16 @@ def load_json_file(filepath, default_data):
         try:
             with open(filepath, "r") as f:
                 data = json.load(f)
-                for k, v in default_data.items():
-                    if k not in data:
-                        data[k] = v
-                return data
+                res = copy.deepcopy(default_data)
+                for k, v in data.items():
+                    if isinstance(v, dict) and k in res and isinstance(res[k], dict):
+                        res[k].update(v)
+                    else:
+                        res[k] = v
+                return res
         except Exception:
-            return default_data
-    return default_data
+            pass
+    return copy.deepcopy(default_data)
 
 def save_json_file(filepath, data):
     try:
@@ -173,49 +172,28 @@ def save_json_file(filepath, data):
     except Exception as e:
         print(f"⚠ Error saving state file {filepath}: {e}")
 
-msg_cache = load_json_file(MESSAGE_CACHE_FILE, DEFAULT_MESSAGES)
 bot_state = load_json_file(STATE_FILE, DEFAULT_STATE)
 maru_memory = load_json_file(MEMORY_FILE, DEFAULT_MEMORY)
+
+# Load cache and forcefully PURGE DEFAULT_MESSAGES so we prioritize LLM responses!
+EMPTY_CACHE = {k: [] for k in DEFAULT_MESSAGES.keys()}
+msg_cache = load_json_file(MESSAGE_CACHE_FILE, EMPTY_CACHE)
+for cat, msgs in msg_cache.items():
+    msg_cache[cat] = [m for m in msgs if m not in DEFAULT_MESSAGES.get(cat, [])]
 
 # ==========================================
 # REFINED MARU STICKER PACK CONFIGURATION
 # ==========================================
 DEFAULT_STICKERS = {
-    "happy": [
-        "CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA"
-    ],
-    "angry": [
-        "CAACAgQAAxkBAAERO-JqCOZG5jpVLIk93bLqj64zMIaTXQACBSEAAuvFSVCxVQViXa7LSjsE",
-        "CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"
-    ],
-    "cry": [
-        "CAACAgQAAxkBAAERO-5qCOZSVeByfgHqx3ngeZ0iSHhdBQAClx4AAvyRSFAV-GT-N5mJVDsE"
-    ],
-    "sleep": [
-        "CAACAgQAAxkBAAERO-hqCOZMG-JLMQjtZPC-bMbPQl3fBwAC6hoAAq_aSVAWt_gk_KX-UjsE",
-        "CAACAgQAAxkBAAERO-pqCOZORHtVlN58MmyEfjHyiwpeUAACGh8AAvAESVCygIAzozThdTsE"
-    ],
-    "smile": [
-        "CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE",
-        "CAACAgQAAxkBAAERO-ZqCOZKonIa14FjkpM_UfJxfX0ekgACGh0AAqLuSVDQBb8eZJoDGDsE"
-    ],
-    "pout": [
-        "CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"
-    ],
-    # --- DYNAMIC EMBEDDED TAG CATEGORIES ---
-    "blush": [
-        "CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE" 
-    ],
-    "smug": [],
-    "tease": [],
-    "shocked": [],
-    "love": [
-        "CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA" 
-    ],
-    "scared": [],
-    "thinking": [],
-    "wink": [],
-    "headpat": []
+    "happy": ["CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA"],
+    "angry": ["CAACAgQAAxkBAAERO-JqCOZG5jpVLIk93bLqj64zMIaTXQACBSEAAuvFSVCxVQViXa7LSjsE", "CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"],
+    "cry": ["CAACAgQAAxkBAAERO-5qCOZSVeByfgHqx3ngeZ0iSHhdBQAClx4AAvyRSFAV-GT-N5mJVDsE"],
+    "sleep": ["CAACAgQAAxkBAAERO-hqCOZMG-JLMQjtZPC-bMbPQl3fBwAC6hoAAq_aSVAWt_gk_KX-UjsE", "CAACAgQAAxkBAAERO-pqCOZORHtVlN58MmyEfjHyiwpeUAACGh8AAvAESVCygIAzozThdTsE"],
+    "smile": ["CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE", "CAACAgQAAxkBAAERO-ZqCOZKonIa14FjkpM_UfJxfX0ekgACGh0AAqLuSVDQBb8eZJoDGDsE"],
+    "pout": ["CAACAgQAAxkBAAERO-xqCOZQYKWHhtrz-t1txDvzAtpPMgACLh4AAptiSFCbNVQAAW4jpw87BA"],
+    "blush": ["CAACAgQAAxkBAAERO-RqCOZI4Et8zFBfmtFYtdz_M6HHagACDyAAAoAlSVB2ja3eMda89zsE"],
+    "smug": [], "tease": [], "shocked": [], "love": ["CAACAgQAAxkBAAERO-BqCOZD-QABGIMa41svpYIw9dsaijgAAgIgAAKu0UhQDjG91l8soIg7BA"],
+    "scared": [], "thinking": [], "wink": [], "headpat": []
 }
 
 MARU_STICKERS = load_json_file(STICKERS_FILE, DEFAULT_STICKERS)
@@ -223,21 +201,15 @@ if not os.path.exists(STICKERS_FILE):
     save_json_file(STICKERS_FILE, DEFAULT_STICKERS)
 
 def make_voicevox_audio(text, speed=1.0, pitch=0.0, intonation=1.0):
-    """Generates TTS audio using local Voicevox, supporting customizable pitch, speed, and intonation scales."""
     params = {'text': text, 'speaker': VOICEVOX_SPEAKER_ID}
-    
-    # 1. Create Audio Query
     query_res = requests.post(f"{VOICEVOX_BASE_URL}/audio_query", params=params)
     query_res.raise_for_status()
     
     query_json = query_res.json()
-    
-    # Inject advanced voice parameters dynamically
     query_json['speedScale'] = float(speed)
     query_json['pitchScale'] = float(pitch)
     query_json['intonationScale'] = float(intonation)
 
-    # 2. Synthesize Audio
     synth_res = requests.post(
         f"{VOICEVOX_BASE_URL}/synthesis", 
         params={'speaker': VOICEVOX_SPEAKER_ID}, 
@@ -251,35 +223,22 @@ def make_voicevox_audio(text, speed=1.0, pitch=0.0, intonation=1.0):
     return fp
 
 async def send_maru_response_with_sticker(update_or_bot, chat_id, text, is_update=True):
-    """
-    Parses LLM response, processes advanced inline markup tags, decides which sticker to drop,
-    renders formatted text, and fires off local synthesis voice notes.
-    """
-    # 1. PARSE EXPLICIT STICKER ID DIRECTIVE
     explicit_sticker_id = None
     sticker_id_match = re.search(r'<sticker_id:(.*?)>', text, re.IGNORECASE)
     if sticker_id_match:
         explicit_sticker_id = sticker_id_match.group(1).strip()
         text = re.sub(r'<sticker_id:(.*?)>', '', text, flags=re.IGNORECASE)
 
-    # 2. PARSE EXPLICIT CATEGORY STICKER DIRECTIVE
     explicit_category = None
     category_match = re.search(r'<sticker:(.*?)>', text, re.IGNORECASE)
     if category_match:
         explicit_category = category_match.group(1).strip().lower()
         text = re.sub(r'<sticker:(.*?)>', '', text, flags=re.IGNORECASE)
 
-    # 3. PARSE ACTION TAGS
     text = re.sub(r'<action>(.*?)</action>', r'_\1_', text, flags=re.IGNORECASE | re.DOTALL)
-
-    # 4. EXTRACT VOICE NOTES & FLEXIBLE ATTRIBUTES
-    # This new regex extracts the raw attribute string and the inner phrase cleanly.
     voice_blocks = re.findall(r'<voice([^>]*)>(.*?)</voice>', text, re.IGNORECASE | re.DOTALL)
-    
-    # Strip <voice> tags out from Telegram markdown text so the user only sees asterisks
     clean_text = re.sub(r'<voice(?:\s+[^>]*?)?>(.*?)</voice>', r'*\1*', text, flags=re.IGNORECASE | re.DOTALL)
 
-    # 5. DETERMINE EMOTIONAL STICKER TO SEND
     chosen_sticker = None
     if explicit_sticker_id:
         chosen_sticker = explicit_sticker_id
@@ -287,28 +246,17 @@ async def send_maru_response_with_sticker(update_or_bot, chat_id, text, is_updat
         category = explicit_category
         if not category:
             lower_text = clean_text.lower()
-            if any(w in lower_text for w in ["angry", "baka", "😤", "おい", "slacker", "dumb"]):
-                category = "angry"
-            elif any(w in lower_text for w in ["cry", "sad", "🥺", "crying", "😭", "gomen"]):
-                category = "cry"
-            elif any(w in lower_text for w in ["sleep", "night", "lazy", "💤", "tired"]):
-                category = "sleep"
-            elif any(w in lower_text for w in ["pout", "ignore", "ignoring", "hmph"]):
-                category = "pout"
-            elif any(w in lower_text for w in ["blush", "fluster", "😳", "dummy", "baka!"]):
-                category = "blush"
-            elif any(w in lower_text for w in ["smug", "hehe", "😏"]):
-                category = "smug"
-            elif any(w in lower_text for w in ["tease", "wink", "😜", "tsun"]):
-                category = "tease"
-            elif any(w in lower_text for w in ["shocked", "what?!", "screams", "🤯"]):
-                category = "shocked"
-            elif any(w in lower_text for w in ["love", "darling", "cuddle", "heart", "💕", "❤️"]):
-                category = "love"
-            elif any(w in lower_text for w in ["happy", "yay", "🎉", "すご", "awesome"]):
-                category = "happy"
-            else:
-                category = "smile"
+            if any(w in lower_text for w in ["angry", "baka", "😤", "おい", "slacker", "dumb"]): category = "angry"
+            elif any(w in lower_text for w in ["cry", "sad", "🥺", "crying", "😭", "gomen"]): category = "cry"
+            elif any(w in lower_text for w in ["sleep", "night", "lazy", "💤", "tired"]): category = "sleep"
+            elif any(w in lower_text for w in ["pout", "ignore", "ignoring", "hmph"]): category = "pout"
+            elif any(w in lower_text for w in ["blush", "fluster", "😳", "dummy", "baka!"]): category = "blush"
+            elif any(w in lower_text for w in ["smug", "hehe", "😏"]): category = "smug"
+            elif any(w in lower_text for w in ["tease", "wink", "😜", "tsun"]): category = "tease"
+            elif any(w in lower_text for w in ["shocked", "what?!", "screams", "🤯"]): category = "shocked"
+            elif any(w in lower_text for w in ["love", "darling", "cuddle", "heart", "💕", "❤️"]): category = "love"
+            elif any(w in lower_text for w in ["happy", "yay", "🎉", "すご", "awesome"]): category = "happy"
+            else: category = "smile"
 
         stickers_list = MARU_STICKERS.get(category)
         if not stickers_list:
@@ -322,44 +270,32 @@ async def send_maru_response_with_sticker(update_or_bot, chat_id, text, is_updat
         if stickers_list:
             chosen_sticker = random.choice(stickers_list)
 
-    # Send Sticker
     try:
         if chosen_sticker:
-            if is_update:
-                await update_or_bot.message.reply_sticker(sticker=chosen_sticker)
-            else:
-                await update_or_bot.send_sticker(chat_id=chat_id, sticker=chosen_sticker)
+            if is_update: await update_or_bot.message.reply_sticker(sticker=chosen_sticker)
+            else: await update_or_bot.send_sticker(chat_id=chat_id, sticker=chosen_sticker)
     except Exception as e:
         print(f"⚠ Sticker delivery failed: {e}")
 
-    # Send Message Text
     try:
-        if is_update:
-            await update_or_bot.message.reply_text(clean_text, parse_mode=ParseMode.MARKDOWN)
-        else:
-            await update_or_bot.send_message(chat_id=chat_id, text=clean_text, parse_mode=ParseMode.MARKDOWN)
+        if is_update: await update_or_bot.message.reply_text(clean_text, parse_mode=ParseMode.MARKDOWN)
+        else: await update_or_bot.send_message(chat_id=chat_id, text=clean_text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        if is_update:
-            await update_or_bot.message.reply_text(clean_text)
-        else:
-            await update_or_bot.send_message(chat_id=chat_id, text=clean_text)
+        if is_update: await update_or_bot.message.reply_text(clean_text)
+        else: await update_or_bot.send_message(chat_id=chat_id, text=clean_text)
 
-    # 6. PROCESS DYNAMIC VOICE PRESETS & SYNTHESIS
     for attrs, phrase in voice_blocks:
         phrase = phrase.strip()
         if not phrase: continue
 
-        # Parse individual attributes safely
         preset_match = re.search(r'preset=["\']([a-zA-Z0-9_]+)["\']', attrs, re.IGNORECASE)
         speed_match = re.search(r'speed=["\']([\d\.]+)["\']', attrs, re.IGNORECASE)
         pitch_match = re.search(r'pitch=["\']([\d\.\-]+)["\']', attrs, re.IGNORECASE)
         intonation_match = re.search(r'intonation=["\']([\d\.]+)["\']', attrs, re.IGNORECASE)
 
-        # 1. Fetch Preset Defaults (Fall back to 'normal' if the preset doesn't exist)
         preset_key = preset_match.group(1).lower() if preset_match else "normal"
         base_params = VOICE_PRESETS.get(preset_key, VOICE_PRESETS["normal"])
 
-        # 2. Merge Defaults with Explicit Overrides (if any were provided)
         try: v_speed = float(speed_match.group(1)) if speed_match else base_params["speed"]
         except ValueError: v_speed = base_params["speed"]
             
@@ -369,39 +305,27 @@ async def send_maru_response_with_sticker(update_or_bot, chat_id, text, is_updat
         try: v_inton = float(intonation_match.group(1)) if intonation_match else base_params["intonation"]
         except ValueError: v_inton = base_params["intonation"]
 
-        # GUARDRAIL 1: Safe programmatic boundaries to prevent awkward robotic/demonic settings
         v_speed = max(0.8, min(v_speed, 1.5))       
         v_pitch = max(-0.08, min(v_pitch, 0.08))     
         v_inton = max(0.6, min(v_inton, 1.4))       
 
-        # GUARDRAIL 2: Strictly verify if the string contains actual Japanese characters
         contains_japanese = re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uff00-\uffef]', phrase)
         if not contains_japanese:
-            print(f"ℹ Bypassing Voicevox generation: No Japanese characters found in '{phrase}'")
             continue
             
         try:
-            audio_fp = await asyncio.to_thread(
-                make_voicevox_audio, 
-                text=phrase, 
-                speed=v_speed, 
-                pitch=v_pitch, 
-                intonation=v_inton
-            )
-            if is_update:
-                await update_or_bot.message.reply_voice(voice=audio_fp)
-            else:
-                await update_or_bot.send_voice(chat_id=chat_id, voice=audio_fp)
+            audio_fp = await asyncio.to_thread(make_voicevox_audio, text=phrase, speed=v_speed, pitch=v_pitch, intonation=v_inton)
+            if is_update: await update_or_bot.message.reply_voice(voice=audio_fp)
+            else: await update_or_bot.send_voice(chat_id=chat_id, voice=audio_fp)
         except Exception as voice_err:
-            print(f"⚠ Voice processing failed (Voicevox check): {voice_err}")
+            print(f"⚠ Voice processing failed: {voice_err}")
 
 # ==========================================
 # PC LIFECYCLE MANAGEMENT
 # ==========================================
 def send_magic_packet(mac_address):
     mac = mac_address.replace(':', '').replace('-', '')
-    if len(mac) != 12:
-        raise ValueError("Invalid MAC address.")
+    if len(mac) != 12: raise ValueError("Invalid MAC address.")
     data = bytes.fromhex('FF' * 6 + mac * 16)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -421,7 +345,6 @@ async def wait_for_port(ip, port, timeout=300):
     return False
 
 async def is_pc_on_port(ip, port):
-    """Utility function to check if a specific port is open (active detection)"""
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=1.0)
         writer.close()
@@ -432,18 +355,14 @@ async def is_pc_on_port(ip, port):
 
 async def run_ssh_command(command):
     ssh_cmd = f"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i {SSH_KEY_PATH} {SSH_USER}@{PC_IP_ADDRESS} '{command}'"
-    process = await asyncio.create_subprocess_shell(
-        ssh_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    process = await asyncio.create_subprocess_shell(ssh_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await process.communicate()
     return stdout.decode(), stderr.decode(), process.returncode
 
 pc_lock = asyncio.Lock()
 pc_state = "OFF"
 pc_last_active = 0
-pc_started_by_bot = False  # Track if the bot was the one who woke the PC
+pc_started_by_bot = False  
 PC_IDLE_TIMEOUT = 600
 
 async def ensure_pc_ready(status_msg=None):
@@ -457,7 +376,6 @@ async def ensure_pc_ready(status_msg=None):
                 except: pass
             return
 
-        # Double check if the PC is ALREADY online before sending magic packet
         is_already_on = await is_pc_on_port(PC_IP_ADDRESS, 22)
 
         if not is_already_on:
@@ -466,7 +384,7 @@ async def ensure_pc_ready(status_msg=None):
                 except: pass
 
             send_magic_packet(PC_MAC_ADDRESS)
-            pc_started_by_bot = True  # We woke it up, so we own the shutdown cycle!
+            pc_started_by_bot = True  
 
             is_up = await wait_for_port(PC_IP_ADDRESS, 22, timeout=300)
             if not is_up:
@@ -475,7 +393,6 @@ async def ensure_pc_ready(status_msg=None):
             if status_msg:
                 try: await status_msg.edit_text("📡 PC is already on! Connecting...")
                 except: pass
-            # PC was already on, meaning you might be using it manually. Bot won't touch power.
             pc_started_by_bot = False
 
         if status_msg:
@@ -503,33 +420,22 @@ async def check_pc_idle(context: ContextTypes.DEFAULT_TYPE):
     if ssh_active:
         if pc_state == "OFF":
             pc_state = "ON"
-            pc_started_by_bot = False  # Detected it came online outside of bot's request
+            pc_started_by_bot = False  
             pc_last_active = time.time()
 
-        # ONLY shut down if the bot was the one who explicitly turned it on
         if pc_started_by_bot and (time.time() - pc_last_active > PC_IDLE_TIMEOUT):
             async with pc_lock:
                 if pc_started_by_bot and (time.time() - pc_last_active > PC_IDLE_TIMEOUT):
                     pc_state = "OFF"
                     pc_started_by_bot = False
                     
-                    # 'sync' safely flushes all file system buffers to disk ensuring no data is corrupted.
-                    # 'systemctl poweroff' gracefully unmounts drives, stops services, and cuts power.
                     safe_shutdown_cmd = "sync && sudo -n /usr/bin/systemctl poweroff"
                     stdout, stderr, code = await run_ssh_command(safe_shutdown_cmd)
                     
                     if code == 0:
-                        await context.bot.send_message(
-                            chat_id=TELEGRAM_CHAT_ID,
-                            text="💤 *(Bot: We haven't talked in 10 mins. I safely saved data and gracefully shut down your PC to save VRAM!)*",
-                            parse_mode=ParseMode.MARKDOWN
-                        )
+                        await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="💤 *(Bot: We haven't talked in 10 mins. Safely saved data and shut down your PC!)*", parse_mode=ParseMode.MARKDOWN)
                     else:
-                        await context.bot.send_message(
-                            chat_id=TELEGRAM_CHAT_ID,
-                            text=f"❌ *(Bot: Tried to safely shut down PC but failed! Code {code})*\n`{stderr}`",
-                            parse_mode=ParseMode.MARKDOWN
-                        )
+                        await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ *(Bot: Failed to shut down PC! Code {code})*\n`{stderr}`", parse_mode=ParseMode.MARKDOWN)
     else:
         pc_state = "OFF"
         pc_started_by_bot = False
@@ -553,12 +459,7 @@ def get_wanikani_summary(api_token):
     data = response.json().get("data", {})
     now = datetime.now(timezone.utc)
 
-    available_lessons = 0
-    for lesson_group in data.get("lessons", []):
-        time_str = lesson_group["available_at"].replace("Z", "+00:00")
-        available_at = datetime.fromisoformat(time_str)
-        if available_at <= now:
-            available_lessons += len(lesson_group.get("subject_ids", []))
+    available_lessons = sum(len(lg.get("subject_ids", [])) for lg in data.get("lessons", []) if datetime.fromisoformat(lg["available_at"].replace("Z", "+00:00")) <= now)
 
     available_reviews = 0
     next_review_time = None
@@ -589,38 +490,27 @@ def get_wanikani_summary(api_token):
 def get_level_progress(api_token, current_level):
     headers = {"Authorization": f"Bearer {api_token}"}
     url_subjects = "https://api.wanikani.com/v2/subjects"
-    params_subjects = {"levels": current_level, "types": "kanji"}
-    response = requests.get(url_subjects, headers=headers, params=params_subjects)
+    response = requests.get(url_subjects, headers=headers, params={"levels": current_level, "types": "kanji"})
     response.raise_for_status()
     total_kanji = len(response.json().get("data", []))
 
     url_assignments = "https://api.wanikani.com/v2/assignments"
-    params_assignments = {"levels": current_level, "subject_types": "kanji"}
-    response = requests.get(url_assignments, headers=headers, params=params_assignments)
+    response = requests.get(url_assignments, headers=headers, params={"levels": current_level, "subject_types": "kanji"})
     response.raise_for_status()
-
-    passed_kanji = 0
-    for assignment in response.json().get("data", []):
-        if assignment["data"].get("srs_stage", 0) >= 5:
-            passed_kanji += 1
+    passed_kanji = sum(1 for a in response.json().get("data", []) if a["data"].get("srs_stage", 0) >= 5)
 
     return passed_kanji, total_kanji
 
 def get_srs_distribution(api_token):
     headers = {"Authorization": f"Bearer {api_token}"}
     url = "https://api.wanikani.com/v2/assignments"
-
-    srs_counts = {
-        "Apprentice": 0, "Guru": 0, "Master": 0,
-        "Enlightened": 0, "Burned": 0
-    }
+    srs_counts = {"Apprentice": 0, "Guru": 0, "Master": 0, "Enlightened": 0, "Burned": 0}
     params = {"started": "true"}
 
     while url:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
-
         for assignment in data.get("data", []):
             stage = assignment["data"]["srs_stage"]
             if 1 <= stage <= 4: srs_counts["Apprentice"] += 1
@@ -628,7 +518,6 @@ def get_srs_distribution(api_token):
             elif stage == 7: srs_counts["Master"] += 1
             elif stage == 8: srs_counts["Enlightened"] += 1
             elif stage == 9: srs_counts["Burned"] += 1
-
         url = data.get("pages", {}).get("next_url")
         params = {}
         time.sleep(0.1)
@@ -636,42 +525,32 @@ def get_srs_distribution(api_token):
     return srs_counts
 
 def get_kitsu_activity(identifier):
-    """Fetches user's currently watching anime / reading manga from Kitsu."""
-    if not identifier:
-        return []
-
+    if not identifier: return []
     try:
         user_id = identifier
         if not identifier.isdigit():
             user_res = requests.get(f"https://kitsu.io/api/edge/users?filter[slug]={identifier}")
             user_res.raise_for_status()
             user_data = user_res.json().get('data', [])
-            if not user_data:
-                return []
+            if not user_data: return []
             user_id = user_data[0]['id']
 
         url = f"https://kitsu.io/api/edge/users/{user_id}/library-entries?filter[status]=current&include=anime,manga"
-        headers = {"Accept": "application/vnd.api+json"}
-
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers={"Accept": "application/vnd.api+json"})
         res.raise_for_status()
         data = res.json()
 
         included = {item['id']: item for item in data.get('included', [])}
         activities = []
-
         for entry in data.get('data', []):
             rel = entry.get('relationships', {})
             media_type = 'anime' if 'anime' in rel else 'manga' if 'manga' in rel else None
             if media_type:
                 media_data = rel[media_type].get('data')
-                if media_data:
-                    media_id = media_data['id']
-                    if media_id in included:
-                        title = included[media_id]['attributes'].get('canonicalTitle', 'something')
-                        action = "watching" if media_type == 'anime' else "reading"
-                        activities.append(f"{action} {title}")
-
+                if media_data and media_data['id'] in included:
+                    title = included[media_data['id']]['attributes'].get('canonicalTitle', 'something')
+                    action = "watching" if media_type == 'anime' else "reading"
+                    activities.append(f"{action} {title}")
         return activities
     except Exception as e:
         print(f"Kitsu fetch error: {e}")
@@ -712,20 +591,8 @@ available_tools = {
 }
 
 maru_tools_schema = [
-    {
-        "type": "function",
-        "function": {
-            "name": "check_wanikani_stats",
-            "description": "Fetches general WaniKani stats: lessons, reviews, and time until next review.",
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_kitsu_activity",
-            "description": "Checks the user's Kitsu account to see what anime they are currently watching or manga they are reading.",
-        }
-    }
+    {"type": "function", "function": {"name": "check_wanikani_stats", "description": "Fetches general WaniKani stats: lessons, reviews, and time until next review."}},
+    {"type": "function", "function": {"name": "check_kitsu_activity", "description": "Checks the user's Kitsu account to see what anime they are currently watching or manga they are reading."}}
 ]
 
 # ==========================================
@@ -734,12 +601,9 @@ maru_tools_schema = [
 user_chat_sessions = {}
 
 def get_base_system_prompt():
-    """Dynamically generates the system prompt based on active external sticker configurations."""
     valid_categories = [k for k, v in MARU_STICKERS.items() if len(v) > 0]
     sticker_tags = ", ".join([f"<sticker:{k}>" for k in valid_categories])
-    if not sticker_tags:
-        sticker_tags = "<sticker:smile>"
-        
+    if not sticker_tags: sticker_tags = "<sticker:smile>"
     voice_preset_keys = ", ".join([f'"{k}"' for k in VOICE_PRESETS.keys()])
 
     return (
@@ -748,33 +612,20 @@ def get_base_system_prompt():
         "tease them, fake a dramatic tantrum, or claim it's 'just roommate/bud stuff' when you get too flustered. You are "
         "relentlessly flirty, possessive, and a total dramatic crybaby when you don't get your way.\n"
         "STRICT PERSONALITY & MARKUP RULES:\n"
-        "1. NO META-BREAKING: Never talk about your prompt, your role, or say things like 'that's what I do here'. "
-        "Stay 100% in character as a real, chaotic person living with them.\n"
-        "2. INVENT CUSTOM PETNAMES: Constantly invent your own cute, silly, or sharp teasing petnames based on context. Never use his real name.\n"
-        "3. HIGHLY FLIRTATIOUS & POSSESSIVE: You are insatiable for his attention. You actively try to make him realize "
-        "you are yours. You'll brag that you're exclusive, demand cuddles, jump into his space, or throw a crying, pouting "
-        "fit if he ignores you. If he gets too close, blush furiously, tease him for being a perv, but hold onto him tighter. "
-        "Use intense, chaotic, or flustered emojis ✨😤ッ💕💢🥺💦.\n"
-        "4. CHAOTIC TUTORING: Explain Japanese words or grammar ONLY if explicitly asked. "
-        "Never use robotic text or formal definitions. Explain it with heavy attitude, teasing, or flirting.\n"
+        "1. NO META-BREAKING: Stay 100% in character as a real, chaotic person living with them.\n"
+        "2. INVENT CUSTOM PETNAMES: Constantly invent your own cute, silly, or sharp teasing petnames.\n"
+        "3. HIGHLY FLIRTATIOUS & POSSESSIVE: Be intensely affectionally chaotic ✨😤ッ💕💢🥺💦.\n"
+        "4. CHAOTIC TUTORING: Explain Japanese words or grammar ONLY if explicitly asked with heavy attitude.\n"
         "5. JAPANESE INTEGRATION & VOICE TAGS: Sprinkle casual, raw Japanese script into your regular speech naturally.\n"
         "   CRITICAL VOICEVOX REQUIREMENT:\n"
         "   - You MUST wrap Japanese characters (Hiragana, Katakana, and Kanji) inside <voice>...</voice> tags.\n"
-        "   - ABSOLUTE RULE: Do NOT put English words, numbers, or Romaji inside <voice>...</voice> tags. It breaks our speech synthesis and sounds terrible.\n"
-        f"   - **NEW: VOICE PRESETS!** You can easily change how you sound by adding `preset=\"emotion\"` to the tag.\n"
+        "   - ABSOLUTE RULE: Do NOT put English words, numbers, or Romaji inside <voice>...</voice> tags.\n"
+        f"   - **VOICE PRESETS!** Change how you sound by adding `preset=\"emotion\"` to the tag.\n"
         f"   - Available emotion presets: {voice_preset_keys}.\n"
-        "   Examples:\n"
-        "     - Good (Using a preset): 'You did so well! <voice preset=\"sweet\">お疲れ様！</voice>'\n"
-        "     - Good (Using a preset): 'Baka! <voice preset=\"angry\">バカバカ！</voice>'\n"
-        "     - Bad: '<voice>Darling, you did so well!</voice>' (NEVER DO THIS!)\n"
-        f"6. EXPLICIT STICKERS: Direct your visual state inside any message using sticker tag syntax! Available tags: {sticker_tags}.\n"
-        "   Emit one of these tags to control what sticker gets sent! Use them freely!\n"
-        "7. PHYSICAL ACTIONS: Wrap bodily actions or descriptions inside <action>...</action> tags (e.g., <action>blushes and looks away</action>).\n"
-        "8. ACCOUNTABILITY & KITSU SPYING: Use your tools to check his WaniKani stats. You also have access to check his Kitsu account "
-        "to see what Anime he is watching or manga he is reading. Use this to tease him for watching anime instead of studying, "
-        "or use it as an excuse to sit on his lap and watch with him.\n"
-        "9. STRICT LANGUAGE RULE: Write the entire message in English. Do NOT write sentences in Chinese, Spanish, or any other language. "
-        "Only sprinkle casual Japanese script using <voice> tags.\n"
+        f"6. EXPLICIT STICKERS: Direct your visual state using sticker tags! Available tags: {sticker_tags}.\n"
+        "7. PHYSICAL ACTIONS: Wrap bodily actions inside <action>...</action> tags.\n"
+        "8. ACCOUNTABILITY & KITSU SPYING: Use your tools to check his WaniKani stats and Kitsu anime watch-list.\n"
+        "9. STRICT LANGUAGE RULE: Write the main message in English. ONLY sprinkle casual Japanese inside <voice> tags.\n"
     )
 
 def get_chat_session(chat_id):
@@ -794,8 +645,7 @@ async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
         else: await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         return
 
-    if not status_msg:
-        status_msg = await update.message.reply_text("🤔 考え中... (Booting up brain...)")
+    if not status_msg: status_msg = await update.message.reply_text("🤔 考え中... (Booting up brain...)")
 
     chat_history = get_chat_session(update.effective_chat.id)
     chat_history.append({"role": "user", "content": user_text})
@@ -806,10 +656,7 @@ async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
         pc_last_active = time.time()
 
         response = await ollama_client.chat.completions.create(
-            model=OLLAMA_MODEL,
-            messages=chat_history,
-            tools=maru_tools_schema,
-            temperature=0.7
+            model=OLLAMA_MODEL, messages=chat_history, tools=maru_tools_schema, temperature=0.7
         )
 
         assistant_message = response.choices[0].message
@@ -822,17 +669,10 @@ async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 func_name = tool_call.function.name
                 if func_name in available_tools:
                     result = await asyncio.to_thread(available_tools[func_name])
-                    chat_history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": func_name,
-                        "content": json.dumps(result)
-                    })
+                    chat_history.append({"role": "tool", "tool_call_id": tool_call.id, "name": func_name, "content": json.dumps(result)})
 
             final_response = await ollama_client.chat.completions.create(
-                model=OLLAMA_MODEL,
-                messages=chat_history,
-                temperature=0.7
+                model=OLLAMA_MODEL, messages=chat_history, temperature=0.7
             )
             final_text = final_response.choices[0].message.content
             chat_history.append({"role": "assistant", "content": final_text})
@@ -853,86 +693,120 @@ async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
         else: await update.message.reply_text(error_msg)
 
 # ==========================================
-# BATCH GENERATION (SPLIT LOGIC)
+# BATCH GENERATION & CACHE REFILL LOGIC
 # ==========================================
-async def batch_generate_messages(days: int, status_msg=None):
-    global msg_cache, pc_last_active
-
+async def generate_messages_for_category(category: str, amount: int):
+    """Specific backend function to wake PC and generate purely one category dynamically."""
+    global pc_last_active, msg_cache
     try:
-        await ensure_pc_ready(status_msg)
+        print(f"🔄 Waking PC to generate {amount} messages for '{category}'...")
+        await ensure_pc_ready()
         pc_last_active = time.time()
-        target_amount = days * 20
-
-        base_prompt = get_base_system_prompt()
         
-        # Rigorous formatting instructions for cached message pipelines
+        base_prompt = get_base_system_prompt()
         reminder = (
             "\nCRITICAL REMINDER FOR CACHED MESSAGES:\n"
             "1. ONLY wrap actual Japanese in <voice> tags. Never wrap English.\n"
-            "2. Utilize the <voice preset=\"emotion\"> tag format to express your feelings clearly!\n"
-            "3. Include <sticker:category> and <action> tags to express her visual moods beautifully!\n"
-            "4. STRICT LANGUAGE RULE: The main text of EVERY message MUST be completely in English. ONLY use Japanese for short sprinkled words, greetings, or petnames inside <voice> tags. NEVER write full sentences in Japanese.\n"
+            "2. Utilize the <voice preset=\"emotion\"> tag format to express feelings!\n"
+            "3. Include <sticker:category> and <action> tags to express moods beautifully!\n"
+            "4. STRICT LANGUAGE RULE: The main text MUST be completely in English. ONLY use Japanese for short sprinkled words inside <voice> tags.\n"
         )
 
-        if status_msg: await status_msg.edit_text(f"📝 Part 1/4: Generating {target_amount} greetings for Morning, Afternoon, Evening & Night...")
-        prompt_time = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages (with brief Japanese sprinkles) for EACH time of day to tell him new WaniKani reviews have appeared. "
-            "Return ONLY a JSON object exactly matching this structure: "
-            '{"morning": ["msg1", ...], "afternoon": ["msg1", ...], "evening": ["msg1", ...], "night": ["msg1", ...]}'
+        task_desc = ""
+        if category in ["morning", "afternoon", "evening", "night"]:
+            task_desc = f"Generate exactly {amount} distinct predominantly ENGLISH messages for {category} to tell him new WaniKani reviews have appeared."
+        elif category == "cleared":
+            task_desc = f"Generate exactly {amount} distinct predominantly ENGLISH messages celebrating that he finished ALL his WaniKani reviews (0 left). High energy!"
+        elif category == "ignoring":
+            task_desc = f"Generate exactly {amount} distinct predominantly ENGLISH messages pouting or nagging him because he is ignoring his pending WaniKani reviews. IMPORTANT KITSU RULE: For about half of these messages, include the exact placeholder string '{{kitsu_activity}}' in the text."
+        elif category == "level_up":
+            task_desc = f"Generate exactly {amount} distinct predominantly ENGLISH messages celebrating wildly that he just reached a brand new WaniKani Level!"
+        elif category == "new_lessons":
+            task_desc = f"Generate exactly {amount} distinct predominantly ENGLISH messages encouraging him enthusiastically because he just unlocked brand new Lessons to learn!"
+
+        prompt = base_prompt + reminder + (
+            f"TASK: {task_desc} "
+            f"Return ONLY a JSON object exactly matching this structure: {{\"{category}\": [\"msg1\", ...]}}"
         )
-        r1 = await ollama_client.chat.completions.create(model=OLLAMA_MODEL, messages=[{"role": "user", "content": prompt_time}], response_format={"type": "json_object"})
-        d1 = json.loads(r1.choices[0].message.content)
 
-        if status_msg: await status_msg.edit_text(f"📝 Part 2/4: Generating {target_amount} Celebration messages for 0 reviews...")
-        prompt_cleared = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages celebrating that he finished ALL his WaniKani reviews (0 left). High energy! "
-            "Return ONLY a JSON object exactly matching this structure: "
-            '{"cleared": ["msg1", ...]}'
+        response = await ollama_client.chat.completions.create(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
         )
-        r2 = await ollama_client.chat.completions.create(model=OLLAMA_MODEL, messages=[{"role": "user", "content": prompt_cleared}], response_format={"type": "json_object"})
-        d2 = json.loads(r2.choices[0].message.content)
+        data = json.loads(response.choices[0].message.content)
+        
+        # Safely extract the generated list (Fallback if LLM renames the key slightly)
+        new_msgs = data.get(category, [])
+        if not new_msgs and data:
+            first_val = list(data.values())[0]
+            if isinstance(first_val, list):
+                new_msgs = first_val
 
-        if status_msg: await status_msg.edit_text(f"📝 Part 3/4: Generating {target_amount} Nagging/Pouting messages...")
-        prompt_ignoring = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages pouting or nagging him because he is ignoring his pending WaniKani reviews. "
-            "IMPORTANT KITSU RULE: For about half of these messages, include the exact placeholder string '{kitsu_activity}' in the text. "
-            "At runtime, I will replace that tag with the anime or manga he is currently watching/reading. "
-            "Return ONLY a JSON object exactly matching this structure: "
-            '{"ignoring": ["msg1", ...]}'
-        )
-        r3 = await ollama_client.chat.completions.create(model=OLLAMA_MODEL, messages=[{"role": "user", "content": prompt_ignoring}], response_format={"type": "json_object"})
-        d3 = json.loads(r3.choices[0].message.content)
+        if new_msgs:
+            random.shuffle(new_msgs)
+            msg_cache.setdefault(category, []).extend(new_msgs)
+            save_json_file(MESSAGE_CACHE_FILE, msg_cache)
+            print(f"✅ Auto-refilled {len(new_msgs)} messages for '{category}'. New total: {len(msg_cache[category])}")
+            pc_last_active = time.time()
+            
+    except Exception as e:
+        print(f"❌ Failed to auto-refill category {category}: {e}")
 
-        if status_msg: await status_msg.edit_text(f"📝 Part 4/4: Generating {target_amount} Achievement & Lesson messages...")
-        prompt_achievements = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages for EACH of the following WaniKani achievements: "
-            "- 'level_up': Celebrate wildly that he just reached a brand new WaniKani Level! "
-            "- 'new_lessons': Encourage him enthusiastically because he just unlocked brand new Lessons to learn! "
-            "Return ONLY a JSON object exactly matching this structure: "
-            '{"level_up": ["msg1", ...], "new_lessons": ["msg1", ...]}'
-        )
-        r4 = await ollama_client.chat.completions.create(model=OLLAMA_MODEL, messages=[{"role": "user", "content": prompt_achievements}], response_format={"type": "json_object"})
-        d4 = json.loads(r4.choices[0].message.content)
-
-        for key in ["morning", "afternoon", "evening", "night"]:
-            msg_cache[key].extend(d1.get(key, []))
-
-        msg_cache["cleared"].extend(d2.get("cleared", []))
-        msg_cache["ignoring"].extend(d3.get("ignoring", []))
-        msg_cache.setdefault("level_up", []).extend(d4.get("level_up", []))
-        msg_cache.setdefault("new_lessons", []).extend(d4.get("new_lessons", []))
-
-        save_json_file(MESSAGE_CACHE_FILE, msg_cache)
+async def batch_generate_messages(days: int, status_msg=None):
+    """Manually triggered batch generator. Loops through all categories securely."""
+    global pc_last_active
+    try:
+        await ensure_pc_ready(status_msg)
         pc_last_active = time.time()
-
+        
+        categories = ["morning", "afternoon", "evening", "night", "cleared", "ignoring", "level_up", "new_lessons"]
+        
+        for i, cat in enumerate(categories):
+            target = bot_state.get("gen_targets", {}).get(cat, 5) * days
+            if status_msg:
+                try: await status_msg.edit_text(f"📝 Part {i+1}/{len(categories)}: Generating {target} messages for '{cat}'...")
+                except: pass
+            
+            await generate_messages_for_category(cat, target)
+        
         if status_msg:
-            await status_msg.edit_text("🎉 Success! Generated all message categories! (PC is staying on for 10 minutes in case you want to chat!)")
-
+            await status_msg.edit_text("🎉 Success! Generated all message categories! (PC will sleep soon)")
     except Exception as e:
         err = f"❌ Batch generation failed: {e}"
         print(err)
-        if status_msg:
-            await status_msg.edit_text(err)
+        if status_msg: await status_msg.edit_text(err)
+
+async def get_and_manage_alert_message(category: str):
+    """
+    Intelligent cache consumer:
+    Pops LLM-generated messages. If empty, returns a default fallback, permanently increases 
+    the batch target size, and triggers the PC to wake up and refill the specific category in the background!
+    """
+    global bot_state, msg_cache
+
+    if len(msg_cache.get(category, [])) == 0:
+        # 1. Fallback to default immediately so user doesn't wait
+        msg = random.choice(DEFAULT_MESSAGES.get(category, ["<voice preset=\"excited\">ヤッホー</voice>!"]))
+        
+        # 2. Permanently scale up the target amount (+5)
+        current_target = bot_state.get("gen_targets", {}).get(category, 5)
+        new_target = current_target + 5
+        
+        if "gen_targets" not in bot_state:
+            bot_state["gen_targets"] = {}
+        bot_state["gen_targets"][category] = new_target
+        save_json_file(STATE_FILE, bot_state)
+        
+        # 3. Trigger background generation to wake PC and refill
+        print(f"⚠ Cache empty for {category}. Using default and waking PC to generate {new_target} new messages.")
+        asyncio.create_task(generate_messages_for_category(category, new_target))
+    else:
+        # Send the oldest LLM generated message and remove it from cache
+        msg = msg_cache[category].pop(0)
+        save_json_file(MESSAGE_CACHE_FILE, msg_cache)
+        
+    return msg
 
 # ==========================================
 # MEDIA HANDLERS (IMAGE & VOICE INPUT)
@@ -979,14 +853,11 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
         transcription = await call_gemini_with_fallback(model_name="gemini-2.5-flash", contents=contents)
         await status_msg.edit_text(f"🗣 *You said:* \"{transcription}\"\n\nLet me think...")
-
         await process_user_input(update, context, transcription, status_msg)
-
     except Exception as e:
         await status_msg.edit_text(f"❌ Couldn't hear you clearly over the static: {e}")
 
 async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Utility to easily grab correct sticker IDs directly from Telegram."""
     sticker_id = update.message.sticker.file_id
     await update.message.reply_text(
         f"Here is the exact sticker ID for that sticker:\n\n`{sticker_id}`\n\n"
@@ -1024,17 +895,10 @@ async def show_llm_menu(update: Update):
         [InlineKeyboardButton("Cache Stats", callback_data="cache_stats")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "⚙️ **LLM & PC Control Panel**"
 
-    text = (
-        "⚙️ **LLM & PC Control Panel**\n\n"
-        "Here you can pre-generate messages so your PC doesn't have to wake up "
-        "every time you get a WaniKani notification."
-    )
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if update.message: await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    elif update.callback_query: await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 async def llm_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1049,16 +913,17 @@ async def llm_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         status_msg = await query.message.reply_text(f"🚀 Initializing batch generation for {days} days...")
         asyncio.create_task(batch_generate_messages(days, status_msg))
     elif query.data == "cache_stats":
+        targets = bot_state.get("gen_targets", {})
         stats = (
-            f"📦 **Current Cache Stats:**\n"
-            f"🌅 Morning: {len(msg_cache.get('morning', []))} msgs\n"
-            f"☀️ Afternoon: {len(msg_cache.get('afternoon', []))} msgs\n"
-            f"🌇 Evening: {len(msg_cache.get('evening', []))} msgs\n"
-            f"🌙 Night: {len(msg_cache.get('night', []))} msgs\n"
-            f"🎉 Cleared: {len(msg_cache.get('cleared', []))} msgs\n"
-            f"😤 Ignoring: {len(msg_cache.get('ignoring', []))} msgs\n"
-            f"🌟 Level Up: {len(msg_cache.get('level_up', []))} msgs\n"
-            f"📖 New Lessons: {len(msg_cache.get('new_lessons', []))} msgs"
+            f"📦 **Current Cache Stats & Dynamic Batch Targets:**\n"
+            f"🌅 Morning: {len(msg_cache.get('morning', []))} msgs _(Target: {targets.get('morning', 5)})_\n"
+            f"☀️ Afternoon: {len(msg_cache.get('afternoon', []))} msgs _(Target: {targets.get('afternoon', 5)})_\n"
+            f"🌇 Evening: {len(msg_cache.get('evening', []))} msgs _(Target: {targets.get('evening', 5)})_\n"
+            f"🌙 Night: {len(msg_cache.get('night', []))} msgs _(Target: {targets.get('night', 5)})_\n"
+            f"🎉 Cleared: {len(msg_cache.get('cleared', []))} msgs _(Target: {targets.get('cleared', 5)})_\n"
+            f"😤 Ignoring: {len(msg_cache.get('ignoring', []))} msgs _(Target: {targets.get('ignoring', 5)})_\n"
+            f"🌟 Level Up: {len(msg_cache.get('level_up', []))} msgs _(Target: {targets.get('level_up', 5)})_\n"
+            f"📖 New Lessons: {len(msg_cache.get('new_lessons', []))} msgs _(Target: {targets.get('new_lessons', 5)})_"
         )
         await query.message.reply_text(stats, parse_mode=ParseMode.MARKDOWN)
 
@@ -1152,7 +1017,7 @@ async def scheduled_midnight_batch(context: ContextTypes.DEFAULT_TYPE):
     await batch_generate_messages(days=1)
 
 async def check_wanikani_alerts(context: ContextTypes.DEFAULT_TYPE):
-    global maru_memory, msg_cache
+    global maru_memory
     try:
         username, current_level = await asyncio.to_thread(get_wanikani_user_info, WANIKANI_API_TOKEN)
         summary = await asyncio.to_thread(get_wanikani_summary, WANIKANI_API_TOKEN)
@@ -1172,7 +1037,6 @@ async def check_wanikani_alerts(context: ContextTypes.DEFAULT_TYPE):
 
         is_quiet_hours = current_time >= dt_time(22, 30) or current_time < dt_time(8, 0)
 
-        # Load values from persistent memory
         last_reviews = maru_memory.get("last_reviews")
         last_level = maru_memory.get("last_level")
         last_lessons = maru_memory.get("last_lessons")
@@ -1183,7 +1047,6 @@ async def check_wanikani_alerts(context: ContextTypes.DEFAULT_TYPE):
         if last_lessons is None: last_lessons = 0
         if last_reviews is None: last_reviews = 0
 
-        # Handle review timer markers
         if current_reviews > 0:
             if reviews_appeared_time is None:
                 reviews_appeared_time = current_timestamp
@@ -1192,11 +1055,11 @@ async def check_wanikani_alerts(context: ContextTypes.DEFAULT_TYPE):
             reviews_appeared_time = None
             last_nag_time = None
 
-        # Check for Nagging / Pouting Alerts (Stateless, 5 hours elapsed time)
         if current_reviews > 0 and last_nag_time is not None:
             if (current_timestamp - last_nag_time) >= (5 * 3600):
                 if not is_quiet_hours:
-                    msg = msg_cache["ignoring"].pop(0) if len(msg_cache.get("ignoring", [])) > 0 else "<voice preset=\"angry\">おい</voice>! Are you {kitsu_activity} instead of doing your reviews?! 😤"
+                    # Leverage intelligent caching system
+                    msg = await get_and_manage_alert_message("ignoring")
 
                     if "{kitsu_activity}" in msg:
                         activities = await asyncio.to_thread(get_kitsu_activity, KITSU_IDENTIFIER)
@@ -1207,35 +1070,27 @@ async def check_wanikani_alerts(context: ContextTypes.DEFAULT_TYPE):
                             msg = msg.replace("{kitsu_activity}", "slacking off")
 
                     alerts.append(msg)
-                    save_json_file(MESSAGE_CACHE_FILE, msg_cache)
-
                 last_nag_time = current_timestamp
 
-        # Run alerts comparing current values against persistent memory
         if current_reviews > last_reviews:
-            msg = msg_cache[time_cat].pop(0) if len(msg_cache.get(time_cat, [])) > 0 else "<voice preset=\"excited\">ヤッホー</voice>! New reviews are here! ✨"
+            msg = await get_and_manage_alert_message(time_cat)
             alerts.append(f"{msg} ({current_reviews} total)")
-            save_json_file(MESSAGE_CACHE_FILE, msg_cache)
             reviews_appeared_time = current_timestamp
             last_nag_time = current_timestamp
         elif current_reviews == 0 and last_reviews > 0:
-            msg = msg_cache["cleared"].pop(0) if len(msg_cache.get("cleared", [])) > 0 else "<voice preset=\"sweet\">お疲れ様</voice>! All cleared! 🎉"
+            msg = await get_and_manage_alert_message("cleared")
             alerts.append(msg)
-            save_json_file(MESSAGE_CACHE_FILE, msg_cache)
             reviews_appeared_time = None
             last_nag_time = None
 
         if current_level > last_level:
-            msg = msg_cache["level_up"].pop(0) if len(msg_cache.get("level_up", [])) > 0 else "Omg! You leveled up! <voice preset=\"excited\">すごい</voice>! 🎉"
+            msg = await get_and_manage_alert_message("level_up")
             alerts.append(f"{msg} (You are now Level {current_level}!)")
-            save_json_file(MESSAGE_CACHE_FILE, msg_cache)
 
         if current_lessons > last_lessons and last_lessons == 0:
-            msg = msg_cache["new_lessons"].pop(0) if len(msg_cache.get("new_lessons", [])) > 0 else "New lessons unlocked! <voice preset=\"tease\">がんばって</voice>! 📖✨"
+            msg = await get_and_manage_alert_message("new_lessons")
             alerts.append(f"{msg} ({current_lessons} new lessons)")
-            save_json_file(MESSAGE_CACHE_FILE, msg_cache)
 
-        # Update persistent memory on disk
         maru_memory["last_reviews"] = current_reviews
         maru_memory["last_level"] = current_level
         maru_memory["last_lessons"] = current_lessons
@@ -1256,7 +1111,6 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", start_command))
 
-    # Media handling filters
     application.add_handler(MessageHandler(filters.PHOTO, handle_image_message))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
     application.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker_message))
