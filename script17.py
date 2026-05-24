@@ -850,11 +850,12 @@ async def batch_generate_messages(days: int, status_msg=None):
             "1. ONLY wrap actual Japanese in <voice> tags. Never wrap English.\n"
             "2. Utilize the <voice preset=\"emotion\"> tag format to express your feelings clearly!\n"
             "3. Include <sticker:category> and <action> tags to express her visual moods beautifully!\n"
+            "4. STRICT LANGUAGE RULE: The main text of EVERY message MUST be completely in English. ONLY use Japanese for short sprinkled words, greetings, or petnames inside <voice> tags. NEVER write full sentences in Japanese.\n"
         )
 
         if status_msg: await status_msg.edit_text(f"📝 Part 1/4: Generating {target_amount} greetings for Morning, Afternoon, Evening & Night...")
         prompt_time = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct messages for EACH time of day to tell him new WaniKani reviews have appeared. "
+            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages (with brief Japanese sprinkles) for EACH time of day to tell him new WaniKani reviews have appeared. "
             "Return ONLY a JSON object exactly matching this structure: "
             '{"morning": ["msg1", ...], "afternoon": ["msg1", ...], "evening": ["msg1", ...], "night": ["msg1", ...]}'
         )
@@ -863,7 +864,7 @@ async def batch_generate_messages(days: int, status_msg=None):
 
         if status_msg: await status_msg.edit_text(f"📝 Part 2/4: Generating {target_amount} Celebration messages for 0 reviews...")
         prompt_cleared = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct messages celebrating that he finished ALL his WaniKani reviews (0 left). High energy! "
+            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages celebrating that he finished ALL his WaniKani reviews (0 left). High energy! "
             "Return ONLY a JSON object exactly matching this structure: "
             '{"cleared": ["msg1", ...]}'
         )
@@ -872,7 +873,7 @@ async def batch_generate_messages(days: int, status_msg=None):
 
         if status_msg: await status_msg.edit_text(f"📝 Part 3/4: Generating {target_amount} Nagging/Pouting messages...")
         prompt_ignoring = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct messages pouting or nagging him because he is ignoring his pending WaniKani reviews. "
+            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages pouting or nagging him because he is ignoring his pending WaniKani reviews. "
             "IMPORTANT KITSU RULE: For about half of these messages, include the exact placeholder string '{kitsu_activity}' in the text. "
             "At runtime, I will replace that tag with the anime or manga he is currently watching/reading. "
             "Return ONLY a JSON object exactly matching this structure: "
@@ -883,7 +884,7 @@ async def batch_generate_messages(days: int, status_msg=None):
 
         if status_msg: await status_msg.edit_text(f"📝 Part 4/4: Generating {target_amount} Achievement & Lesson messages...")
         prompt_achievements = base_prompt + reminder + (
-            f"TASK: Generate exactly {target_amount} distinct messages for EACH of the following WaniKani achievements: "
+            f"TASK: Generate exactly {target_amount} distinct predominantly ENGLISH messages for EACH of the following WaniKani achievements: "
             "- 'level_up': Celebrate wildly that he just reached a brand new WaniKani Level! "
             "- 'new_lessons': Encourage him enthusiastically because he just unlocked brand new Lessons to learn! "
             "Return ONLY a JSON object exactly matching this structure: "
