@@ -21,8 +21,8 @@
 ### Installation Steps
 1. Clone the repository to your local machine.
     ```bash
-    git clone https://github.com/yourusername/master_orchestrator_bot.git
-    cd master_orchestrator_bot
+    git clone https://github.com/egbertmusic/maru-wanikani-coach.git
+    cd maru-wanikani-coach
     ```
 2. Install dependencies:
     ```bash
