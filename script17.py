@@ -443,10 +443,11 @@ async def run_ssh_command(command):
 pc_lock = asyncio.Lock()
 pc_state = "OFF"
 pc_last_active = 0
+pc_started_by_bot = False  # Track if the bot was the one who woke the PC
 PC_IDLE_TIMEOUT = 600
 
 async def ensure_pc_ready(status_msg=None):
-    global pc_state, pc_last_active
+    global pc_state, pc_last_active, pc_started_by_bot
     pc_last_active = time.time()
 
     async with pc_lock:
@@ -456,15 +457,26 @@ async def ensure_pc_ready(status_msg=None):
                 except: pass
             return
 
-        if status_msg:
-            try: await status_msg.edit_text("📡 Waking up Darling's PC... (This takes a minute!)")
-            except: pass
+        # Double check if the PC is ALREADY online before sending magic packet
+        is_already_on = await is_pc_on_port(PC_IP_ADDRESS, 22)
 
-        send_magic_packet(PC_MAC_ADDRESS)
+        if not is_already_on:
+            if status_msg:
+                try: await status_msg.edit_text("📡 Waking up Darling's PC... (This takes a minute!)")
+                except: pass
 
-        is_up = await wait_for_port(PC_IP_ADDRESS, 22, timeout=300)
-        if not is_up:
-            raise Exception("PC did not boot or SSH is unreachable within 5 minutes.")
+            send_magic_packet(PC_MAC_ADDRESS)
+            pc_started_by_bot = True  # We woke it up, so we own the shutdown cycle!
+
+            is_up = await wait_for_port(PC_IP_ADDRESS, 22, timeout=300)
+            if not is_up:
+                raise Exception("PC did not boot or SSH is unreachable within 5 minutes.")
+        else:
+            if status_msg:
+                try: await status_msg.edit_text("📡 PC is already on! Connecting...")
+                except: pass
+            # PC was already on, meaning you might be using it manually. Bot won't touch power.
+            pc_started_by_bot = False
 
         if status_msg:
             try: await status_msg.edit_text("🔓 PC online! Starting my brain (Ollama)...")
@@ -484,34 +496,43 @@ async def ensure_pc_ready(status_msg=None):
             except: pass
 
 async def check_pc_idle(context: ContextTypes.DEFAULT_TYPE):
-    global pc_state, pc_last_active
+    global pc_state, pc_last_active, pc_started_by_bot
 
     ssh_active = await is_pc_on_port(PC_IP_ADDRESS, 22)
 
     if ssh_active:
         if pc_state == "OFF":
             pc_state = "ON"
+            pc_started_by_bot = False  # Detected it came online outside of bot's request
             pc_last_active = time.time()
 
-        if time.time() - pc_last_active > PC_IDLE_TIMEOUT:
+        # ONLY shut down if the bot was the one who explicitly turned it on
+        if pc_started_by_bot and (time.time() - pc_last_active > PC_IDLE_TIMEOUT):
             async with pc_lock:
-                if time.time() - pc_last_active > PC_IDLE_TIMEOUT:
+                if pc_started_by_bot and (time.time() - pc_last_active > PC_IDLE_TIMEOUT):
                     pc_state = "OFF"
-                    stdout, stderr, code = await run_ssh_command("sudo -n /usr/bin/systemctl poweroff")
+                    pc_started_by_bot = False
+                    
+                    # 'sync' safely flushes all file system buffers to disk ensuring no data is corrupted.
+                    # 'systemctl poweroff' gracefully unmounts drives, stops services, and cuts power.
+                    safe_shutdown_cmd = "sync && sudo -n /usr/bin/systemctl poweroff"
+                    stdout, stderr, code = await run_ssh_command(safe_shutdown_cmd)
+                    
                     if code == 0:
                         await context.bot.send_message(
                             chat_id=TELEGRAM_CHAT_ID,
-                            text="💤 *(Bot: We haven't talked in 10 mins. I safely shut down your PC to save VRAM!)*",
+                            text="💤 *(Bot: We haven't talked in 10 mins. I safely saved data and gracefully shut down your PC to save VRAM!)*",
                             parse_mode=ParseMode.MARKDOWN
                         )
                     else:
                         await context.bot.send_message(
                             chat_id=TELEGRAM_CHAT_ID,
-                            text=f"❌ *(Bot: Tried to shut down PC but failed! Code {code})*\n`{stderr}`",
+                            text=f"❌ *(Bot: Tried to safely shut down PC but failed! Code {code})*\n`{stderr}`",
                             parse_mode=ParseMode.MARKDOWN
                         )
     else:
         pc_state = "OFF"
+        pc_started_by_bot = False
 
 # ==========================================
 # EXTERNAL API FUNCTIONS (WaniKani & Kitsu)
